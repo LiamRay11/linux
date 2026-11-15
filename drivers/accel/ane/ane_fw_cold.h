@@ -153,7 +153,7 @@ struct ane_fw_handoff {
 	bool regions_ok;
 	u64 phys[2], size[2], dva[2];
 	bool text_ok;
-	/* The admitted build the layout names and the measured TEXT digest. */
+	/* The admitted build the layout and TEXT name, and the measured TEXT digest. */
 	const struct ane_fw_preload_build *build;
 	u8 text_digest[32];
 	const struct ane_fw_cold_state *pmgr;

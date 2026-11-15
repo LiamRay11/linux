@@ -58,6 +58,17 @@ static const u8 ane_t6050_text_pin_27_3[] = {
 };
 
 /*
+ * The same 27.0 build as iBoot 20457.1.29 preloads it on a J716c (M5 Max). The
+ * firmware image is the J714s's; the board data iBoot writes into TEXT differs.
+ */
+static const u8 ane_t6050_text_pin_27_0_j716c[] = {
+	0x17, 0x5d, 0xaf, 0x81, 0x9e, 0xf2, 0x41, 0xf1,
+	0xb2, 0xd2, 0x56, 0x71, 0xed, 0x42, 0x09, 0xe2,
+	0x11, 0x28, 0x66, 0x40, 0xf0, 0xd8, 0x93, 0x50,
+	0x55, 0x79, 0xef, 0x18, 0x6c, 0x1d, 0x53, 0xb1,
+};
+
+/*
  * T6050 builds, by their ADT ane0 segment-ranges. 27.3 moved 0x2c000 bytes
  * from DATA into TEXT; the firmware span (heap tail, pool, IPC) is unchanged.
  */
@@ -67,6 +78,12 @@ static const struct ane_fw_preload_build ane_t6050_builds[] = {
 		.dva = { 0x10000000000, 0x100000c0000 },
 		.size = { 0xc0000, 0x2ac000 },
 		.text_pin = ane_t6050_text_pin_27_0,
+	},
+	{
+		.name = "27.0 J716c",
+		.dva = { 0x10000000000, 0x100000c0000 },
+		.size = { 0xc0000, 0x2ac000 },
+		.text_pin = ane_t6050_text_pin_27_0_j716c,
 	},
 	{
 		.name = "27.3",
