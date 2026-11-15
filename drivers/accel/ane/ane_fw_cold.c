@@ -74,7 +74,7 @@ struct ane_fw_backend {
 	struct ane_fw_surface preload[2], heap_tail;
 	u64 preload_phys[2];
 	u8 data_digest[SHA256_DIGEST_SIZE];
-	/* The TEXT digest of the preloaded build, chosen by its layout. */
+	/* The TEXT digest of the preloaded build, chosen by its layout and TEXT. */
 	const u8 *text_pin;
 	/* Powered down for system sleep; a (cold or warm) boot is due. */
 	bool slept;
@@ -1554,8 +1554,7 @@ static int ane_fw_preload_metadata(struct ane_fw_backend *b, u64 physical[2],
 		if (ret)
 			return ret;
 	}
-	b->text_pin = ane_fw_preload_text_pin(b->soc, physical, size, dva);
-	if (!b->text_pin)
+	if (!ane_fw_preload_ranges_valid(b->soc, physical, size, dva))
 		return -EINVAL;
 	return 0;
 }
@@ -1594,7 +1593,9 @@ static int ane_fw_preload(struct ane_fw_backend *b)
 		sha256_init(&hash);
 		sha256_update(&hash, snapshots[i].cpu, size[i]);
 		sha256_final(&hash, digest);
-		if (memcmp(digest, i ? data_pin : b->text_pin, sizeof(digest)))
+		if (!i)
+			b->text_pin = ane_fw_preload_text_pin(b->soc, physical, size, dva, digest);
+		if (i ? memcmp(digest, data_pin, sizeof(digest)) : !b->text_pin)
 			return -EKEYREJECTED;
 	}
 	/* Preserve every personalized DATA byte, including the iBoot TLV table. */
@@ -2139,7 +2140,7 @@ static bool ane_fw_handoff_present(struct platform_device *pdev,
 	struct device_node *np = pdev->dev.of_node;
 	struct device_node *chosen __free(device_node) = of_find_node_by_path("/chosen");
 	struct ane_fw_handoff h = {};
-	const u8 *pin = NULL;
+	bool layout = false;
 	unsigned int i;
 
 	if (chosen)
@@ -2157,15 +2158,16 @@ static bool ane_fw_handoff_present(struct platform_device *pdev,
 			       !ane_fw_preload_range(np, i, &h.phys[i], &h.size[i]);
 	}
 	if (h.regions_ok)
-		pin = ane_fw_preload_text_pin(soc, h.phys, h.size, h.dva);
-	if (pin) {
+		layout = ane_fw_preload_ranges_valid(soc, h.phys, h.size, h.dva);
+	if (layout) {
 		void *text = memremap(h.phys[0], h.size[0], MEMREMAP_WB);
 
-		h.build = ane_fw_preload_build(soc, h.phys, h.size, h.dva);
 		if (text) {
 			sha256(text, h.size[0], h.text_digest);
 			memunmap(text);
-			h.text_ok = !memcmp(h.text_digest, pin, sizeof(h.text_digest));
+			h.build = ane_fw_preload_build(soc, h.phys, h.size, h.dva, h.text_digest);
+			h.text_ok = ane_fw_preload_text_pin(soc, h.phys, h.size, h.dva,
+							    h.text_digest);
 		}
 	}
 	*hp = h;
@@ -2174,8 +2176,8 @@ static bool ane_fw_handoff_present(struct platform_device *pdev,
 	dev_info(&pdev->dev, "H17 ANE: no loader hand-off (%s); leaving the engine alone\n",
 		 !h.marker || strcmp(h.marker, ANE_FW_COLD_BOOT_EVIDENCE) ? "raw-boot marker" :
 		 !h.preloaded || !h.regions_ok ? "preload reservations" :
-		 !pin ? "preload layout" : !h.text_ok ? "firmware TEXT pin" : "preload layout");
-	if (h.regions_ok && !pin)
+		 !layout ? "preload layout" : !h.text_ok ? "firmware TEXT pin" : "preload layout");
+	if (h.regions_ok && !layout)
 		dev_info(&pdev->dev,
 			 "H17 ANE: no admitted build has TEXT %#llx@%#llx DATA %#llx@%#llx\n",
 			 h.size[0], h.dva[0], h.size[1], h.dva[1]);

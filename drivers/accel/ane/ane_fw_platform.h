@@ -7,6 +7,7 @@
 #include <linux/errno.h>
 #include <linux/overflow.h>
 #include <linux/sizes.h>
+#include <linux/string.h>
 #include <linux/types.h>
 
 struct device_node;
@@ -30,6 +31,8 @@ enum ane_fw_irq_role {
  * TEXT/DATA split between macOS releases (T6050: 27.0 TEXT 0xc0000 and DATA
  * 0x2ac000, 27.3 TEXT 0xec000 and DATA 0x280000, both ending at 0x36c000),
  * so the handed-off layout selects the build and the build its TEXT pin.
+ * iBoot also writes board data into TEXT, so one release can have a pin per
+ * board: entries may share a layout, and the measured TEXT picks among them.
  */
 struct ane_fw_preload_build {
 	const char *name;
@@ -139,17 +142,23 @@ ane_fw_preload_layout_match(const u64 want_dva[2], const u64 want_size[2], const
 	return end[0] <= phys[1] || end[1] <= phys[0];
 }
 
-/* The admitted build whose layout the loader handed off, or NULL. */
+/*
+ * The admitted build whose layout the loader handed off and, given the
+ * measured TEXT digest, whose pin it matches; NULL for none.
+ */
 static inline const struct ane_fw_preload_build *
 ane_fw_preload_build(const struct ane_fw_platform *soc, const u64 phys[2],
-		     const u64 size[2], const u64 dva[2])
+		     const u64 size[2], const u64 dva[2], const u8 *text_digest)
 {
+	const struct ane_fw_preload_build *build;
 	unsigned int i;
 
-	for (i = 0; i < soc->preload_build_count; i++)
-		if (ane_fw_preload_layout_match(soc->preload_builds[i].dva,
-						soc->preload_builds[i].size, phys, size, dva))
-			return &soc->preload_builds[i];
+	for (i = 0; i < soc->preload_build_count; i++) {
+		build = &soc->preload_builds[i];
+		if (ane_fw_preload_layout_match(build->dva, build->size, phys, size, dva) &&
+		    (!text_digest || !memcmp(text_digest, build->text_pin, 32)))
+			return build;
+	}
 	return NULL;
 }
 
@@ -158,21 +167,23 @@ ane_fw_preload_ranges_valid(const struct ane_fw_platform *soc, const u64 phys[2]
 			    const u64 size[2], const u64 dva[2])
 {
 	if (soc->preload_build_count)
-		return ane_fw_preload_build(soc, phys, size, dva);
+		return ane_fw_preload_build(soc, phys, size, dva, NULL);
 	return ane_fw_preload_layout_match(soc->preload_dva, soc->preload_size, phys, size, dva);
 }
 
-/* The TEXT digest the handed-off layout must carry, or NULL for none. */
+/* The pin the measured TEXT of the handed-off layout matches, or NULL for none. */
 static inline const u8 *
 ane_fw_preload_text_pin(const struct ane_fw_platform *soc, const u64 phys[2],
-			const u64 size[2], const u64 dva[2])
+			const u64 size[2], const u64 dva[2], const u8 *text_digest)
 {
 	const struct ane_fw_preload_build *build;
 
 	if (!soc->preload_build_count)
 		return ane_fw_preload_layout_match(soc->preload_dva, soc->preload_size, phys,
-						   size, dva) ? soc->text_pin : NULL;
-	build = ane_fw_preload_build(soc, phys, size, dva);
+						   size, dva) &&
+		       (!text_digest || !memcmp(text_digest, soc->text_pin, 32)) ?
+		       soc->text_pin : NULL;
+	build = ane_fw_preload_build(soc, phys, size, dva, text_digest);
 	return build ? build->text_pin : NULL;
 }
 
